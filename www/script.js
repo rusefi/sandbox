@@ -20,15 +20,29 @@ function showMessage(text) {
 /**
  * Checks if the connected serial device is an "openblt" bootloader.
  * This function is based on the logic from the rusefi/rusefi project.
- * It reads a specific byte sequence to check for the openblt protocol magic numbers.
+ * It reads a specific byte sequence to check for the openblt protocol magic numbers,
+ * with a 500ms timeout to prevent hanging.
  * @param {ReadableStreamDefaultReader} reader The reader to use for reading from the serial port.
  * @returns {Promise<boolean>} A promise that resolves to true if it's an openblt device, false otherwise.
  */
 async function checkOpenBLT(reader) {
-    output.textContent += 'Checking for OpenBLT bootloader...\n';
+    output.textContent += 'Checking for OpenBLT bootloader with 500ms timeout...\n';
     try {
-        // Read 8 bytes to get the magic number and protocol version
-        const { value, done } = await reader.read();
+        // Create a promise for the reader.read() operation.
+        const readPromise = reader.read();
+
+        // Create a promise for the 500ms timeout.
+        const timeoutPromise = new Promise((resolve, reject) => {
+            setTimeout(() => {
+                reject(new Error("Timeout: Did not receive data within 500ms."));
+            }, 500);
+        });
+
+        // Use Promise.race() to see which promise resolves or rejects first.
+        const result = await Promise.race([readPromise, timeoutPromise]);
+
+        // If the timeout didn't reject the promise, we have data.
+        const { value, done } = result;
 
         if (done || !value || value.length < 8) {
             output.textContent += 'Failed to read enough data for OpenBLT check.\n';
@@ -36,11 +50,9 @@ async function checkOpenBLT(reader) {
         }
 
         // The OpenBLT protocol starts with a magic number
-        // Magic number bytes from rusefi/rusefi/commit/f2c1a0ae28428dfcb68837e9a081274973de6417
         const openbltMagicNumber = [0x50, 0x00, 0x49, 0x00];
 
         // The received data is a Uint8Array, so we compare byte by byte
-        // The magic number is the first 4 bytes of the value
         for (let i = 0; i < openbltMagicNumber.length; i++) {
             if (value[i] !== openbltMagicNumber[i]) {
                 output.textContent += 'Magic number mismatch. Not an OpenBLT device.\n';
@@ -58,6 +70,7 @@ async function checkOpenBLT(reader) {
     } catch (error) {
         console.error("Error checking OpenBLT protocol:", error);
         output.textContent += `Error during OpenBLT check: ${error.message}\n`;
+        // Since we got a timeout, we'll return false, as it's not the OpenBLT device we were looking for.
         return false;
     }
 }
@@ -75,8 +88,12 @@ async function connectAndSendMessage() {
     output.textContent = 'Web Serial API is supported. Attempting to connect...';
 
     // Request a serial port from the user
+    let port;
+    let reader;
+    let writer;
+
     try {
-        const port = await navigator.serial.requestPort();
+        port = await navigator.serial.requestPort();
 
         await port.open({ baudRate: 9600 });
         output.textContent += 'Connection successful! Port opened at 9600 baud.\n';
@@ -86,11 +103,12 @@ async function connectAndSendMessage() {
         const textDecoder = new TextDecoderStream();
 
         const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-        const writer = textEncoder.writable.getWriter();
-        const reader = textDecoder.readable.getReader();
+        writer = textEncoder.writable.getWriter();
+        reader = textDecoder.readable.getReader();
 
         // Check if the port is an OpenBLT device
         const isOpenBLT = await checkOpenBLT(reader);
+
         if (!isOpenBLT) {
             // If it's not OpenBLT, proceed with sending the "Hello, World!" message.
             output.textContent += 'Proceeding with standard communication.\n';
@@ -126,6 +144,17 @@ async function connectAndSendMessage() {
             showMessage(`An error occurred: ${error.message}`);
         }
         output.textContent += `\nError: ${error.message}`;
+    } finally {
+        // Ensure streams are released if an error occurs
+        if (writer) {
+            writer.releaseLock();
+        }
+        if (reader) {
+            reader.releaseLock();
+        }
+        if (port && port.opened) {
+            await port.close();
+        }
     }
 }
 
