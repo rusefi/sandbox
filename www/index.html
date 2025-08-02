@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Web Serial Hello World</title>
+    <!-- Use Tailwind CSS for modern, responsive styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #1a202c; /* Dark background */
+            color: #e2e8f0; /* Light text */
+        }
+        /* Custom styling for a non-alert message box */
+        .message-box {
+            position: fixed;
+            top: 2rem;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 1rem 2rem;
+            background-color: rgba(30, 41, 59, 0.9);
+            border-radius: 0.5rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            transition: opacity 0.3s ease-in-out;
+            opacity: 0;
+            visibility: hidden;
+            z-index: 1000;
+        }
+        .message-box.show {
+            opacity: 1;
+            visibility: visible;
+        }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen p-4">
+
+<!-- Main application container -->
+<div class="bg-gray-800 p-8 rounded-lg shadow-xl max-w-md w-full text-center">
+    <h1 class="text-3xl font-bold mb-6 text-indigo-400">Web Serial Hello World</h1>
+    <p class="text-gray-400 mb-8">
+        Click the button to connect to a serial port and send a "Hello, World!" message.
+    </p>
+
+    <!-- Connect Button -->
+    <button id="connectButton" class="bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-3 px-6 rounded-full shadow-lg transition duration-300 ease-in-out transform hover:scale-105 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-opacity-50">
+        Connect to Serial Port
+    </button>
+
+    <!-- Status/Output Display Area -->
+    <div id="output" class="mt-8 p-4 bg-gray-700 rounded-lg text-left whitespace-pre-wrap font-mono text-sm text-gray-300 overflow-auto h-48 border border-gray-600">
+        <!-- Output messages will appear here -->
+        <p>Ready. Waiting for connection...</p>
+    </div>
+</div>
+
+<!-- Custom Message Box -->
+<div id="custom-message-box" class="message-box">
+    <p id="message-text"></p>
+</div>
+
+<script>
+    // Get references to the HTML elements
+    const connectButton = document.getElementById('connectButton');
+    const output = document.getElementById('output');
+    const messageBox = document.getElementById('custom-message-box');
+    const messageText = document.getElementById('message-text');
+
+    /**
+     * A function to display temporary messages in a styled box,
+     * avoiding the use of the browser's `alert()` function.
+     * @param {string} text - The message to display.
+     */
+    function showMessage(text) {
+        messageText.textContent = text;
+        messageBox.classList.add('show');
+        setTimeout(() => {
+            messageBox.classList.remove('show');
+        }, 3000);
+    }
+
+    /**
+     * Main function to handle the serial connection process.
+     */
+    async function connectAndSendMessage() {
+        // Check if the Web Serial API is supported by the browser
+        if ('serial' in navigator) {
+            output.textContent = 'Web Serial API is supported. Attempting to connect...';
+        } else {
+            showMessage('Web Serial API not supported in this browser. Please use Chrome, Edge, or a Chromium-based browser.');
+            return;
+        }
+
+        // Request a serial port from the user
+        try {
+            // Request a port. This will open a browser dialog for the user to select a device.
+            const port = await navigator.serial.requestPort();
+
+            // Open the selected port with a common baud rate (e.g., 9600)
+            await port.open({ baudRate: 9600 });
+            output.textContent = 'Connection successful! Port opened at 9600 baud.\n';
+
+            // Setup the text encoder and decoder streams
+            const textEncoder = new TextEncoderStream();
+            const textDecoder = new TextDecoderStream();
+
+            // Pipe the encoder to the port's writable stream
+            const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+
+            // Pipe the port's readable stream to the decoder
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+
+            // Get a writer and a reader to send and receive data
+            const writer = textEncoder.writable.getWriter();
+            const reader = textDecoder.readable.getReader();
+
+            // Send the "Hello, World!" message to the serial device
+            const messageToSend = "Hello, World!\n";
+            await writer.write(messageToSend);
+            output.textContent += `Sent message: "${messageToSend.trim()}"\n`;
+
+            showMessage('Message sent successfully!');
+
+            // Listen for incoming data from the serial port
+            output.textContent += 'Listening for incoming data...\n';
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) {
+                    // Reader has been closed
+                    break;
+                }
+                // Append the received data to the output display
+                output.textContent += `Received: ${value}`;
+            }
+        } catch (error) {
+            // Handle any errors that occur during the connection or communication process
+            console.error("Serial connection error:", error);
+            if (error.name === 'NotFoundError') {
+                showMessage('No serial port selected.');
+            } else if (error.name === 'NetworkError' && error.message.includes('permission denied')) {
+                showMessage('Connection failed: Permission denied by user or system.');
+            } else {
+                showMessage(`An error occurred: ${error.message}`);
+            }
+            output.textContent += `\nError: ${error.message}`;
+        }
+    }
+
+    // Add a click event listener to the button
+    connectButton.addEventListener('click', connectAndSendMessage);
+</script>
+</body>
+</html>
