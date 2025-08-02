@@ -1,0 +1,1 @@
+I am imppressed by https://espressif.github.io/esptool-js/ which seems to use web serial API: looks like Chrome is supposed to connect to ECU and detect if it's in OpenBLT mode or read signature, right?
