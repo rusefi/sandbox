@@ -16,3 +16,5 @@ if not openblt execute getSignature
 did you notice IoHelper.makeCrc32Packet
 
 place makeCrc32Packet logic into new file and use it
+
+log all bytes send or received on console

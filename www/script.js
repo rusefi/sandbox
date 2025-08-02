@@ -21,6 +21,15 @@ function showMessage(text) {
 }
 
 /**
+ * Helper function to convert a Uint8Array to a hex string for logging.
+ * @param {Uint8Array} bytes The array of bytes to convert.
+ * @returns {string} The hexadecimal representation of the bytes.
+ */
+function bytesToHex(bytes) {
+    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
+}
+
+/**
  * Checks if the connected serial device is an "openblt" bootloader.
  * This function is based on the logic from the rusefi/rusefi project.
  * It reads a specific byte sequence to check for the openblt protocol magic numbers,
@@ -46,6 +55,8 @@ async function checkOpenBLT(reader) {
 
         // If the timeout didn't reject the promise, we have data.
         const { value, done } = result;
+
+        console.log("Received bytes from OpenBLT check:", bytesToHex(value));
 
         if (done || !value || value.length < 8) {
             output.textContent += 'Failed to read enough data for OpenBLT check.\n';
@@ -90,6 +101,10 @@ async function getSignature(writer, reader) {
     try {
         // Create the packet using the imported function. Command code is 'A' (0x41).
         const signaturePacket = makeCrc32Packet(0x41);
+
+        // Log the packet before sending
+        console.log("Sending signature request packet:", bytesToHex(signaturePacket));
+
         await writer.write(signaturePacket);
         output.textContent += `Sent signature request (command 'A') with CRC32 packet.\n`;
 
@@ -104,6 +119,8 @@ async function getSignature(writer, reader) {
 
         const lengthResult = await Promise.race([readLengthPromise, timeoutPromise]);
         const { value: lengthBytes, done: lengthDone } = lengthResult;
+
+        console.log("Received length bytes:", bytesToHex(lengthBytes));
 
         if (lengthDone || !lengthBytes || lengthBytes.length < 2) {
             output.textContent += 'Failed to read signature length.\n';
@@ -122,6 +139,7 @@ async function getSignature(writer, reader) {
                 output.textContent += 'Failed to read full signature response.\n';
                 return null;
             }
+            console.log(`Received signature response chunk (${value.length} bytes):`, bytesToHex(value));
             responseBytes.set(value.slice(0, (length + 4) - bytesRead), bytesRead);
             bytesRead += value.length;
         }
@@ -200,6 +218,10 @@ async function connectAndSendMessage() {
             if (signature) {
                  output.textContent += 'Proceeding with standard communication.\n';
                  const messageToSend = "Hello, World!\n";
+
+                 // Log the message before sending
+                 console.log("Sending text message:", messageToSend);
+
                  await writer.write(messageToSend);
                  output.textContent += `Sent message: "${messageToSend.trim()}"\n`;
                  showMessage('Message sent successfully!');
@@ -228,6 +250,8 @@ async function connectAndSendMessage() {
                 output.textContent += 'Reader closed.\n';
                 break;
             }
+            // Log the received text message
+            console.log("Received text:", value);
             output.textContent += `Received: ${value}`;
         }
     } catch (error) {
