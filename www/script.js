@@ -4,6 +4,9 @@ const output = document.getElementById('output');
 const messageBox = document.getElementById('custom-message-box');
 const messageText = document.getElementById('message-text');
 
+// Import the CRC32 utility functions from the new file
+import { makeCrc32Packet } from './crc32.js';
+
 /**
  * A function to display temporary messages in a styled box,
  * avoiding the use of the browser's `alert()` function.
@@ -85,11 +88,13 @@ async function checkOpenBLT(reader) {
 async function getSignature(writer, reader) {
     output.textContent += 'Requesting device signature...\n';
     try {
-        // Send the 'A' command (0x41)
-        await writer.write(new Uint8Array([0x41]));
-        output.textContent += 'Sent signature request (command \'A\').\n';
+        // Create the packet using the imported function. Command code is 'A' (0x41).
+        const signaturePacket = makeCrc32Packet(0x41);
+        await writer.write(signaturePacket);
+        output.textContent += `Sent signature request (command 'A') with CRC32 packet.\n`;
 
-        // Read the 16-bit length of the signature string (little-endian)
+        // The response will also be a length-prefixed string followed by CRC32.
+        // First, read the 16-bit length (little-endian)
         const readLengthPromise = reader.read();
         const timeoutPromise = new Promise((resolve, reject) => {
             setTimeout(() => {
@@ -108,18 +113,22 @@ async function getSignature(writer, reader) {
         // Decode the 16-bit little-endian integer
         const length = new DataView(lengthBytes.buffer).getUint16(0, true);
 
-        // Read the signature string itself
-        const signatureBytes = new Uint8Array(length);
+        // Read the response data (signature string + 4 bytes for CRC32)
+        const responseBytes = new Uint8Array(length + 4);
         let bytesRead = 0;
-        while (bytesRead < length) {
+        while (bytesRead < length + 4) {
             const { value, done } = await reader.read();
             if (done || !value) {
-                output.textContent += 'Failed to read full signature string.\n';
+                output.textContent += 'Failed to read full signature response.\n';
                 return null;
             }
-            signatureBytes.set(value.slice(0, length - bytesRead), bytesRead);
+            responseBytes.set(value.slice(0, (length + 4) - bytesRead), bytesRead);
             bytesRead += value.length;
         }
+
+        // Extract the signature and CRC32
+        const signatureBytes = responseBytes.slice(0, length);
+        // We'll skip CRC32 check for this example, but it would go here.
 
         const signature = new TextDecoder().decode(signatureBytes);
         output.textContent += `Received signature: "${signature}"\n`;

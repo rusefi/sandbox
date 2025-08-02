@@ -12,3 +12,7 @@ https://github.com/rusefi/rusefi/blob/c3635f7c8d186c115b228d135f3dcdb273c9f010/j
 https://github.com/rusefi/rusefi/blob/b01641065e8b946ad697d01f361e42f765c428c0/java_console/io/src/main/java/com/rusefi/binaryprotocol/IoHelper.java#L30
 
 if not openblt execute getSignature
+
+did you notice IoHelper.makeCrc32Packet
+
+place makeCrc32Packet logic into new file and use it
