@@ -76,6 +76,63 @@ async function checkOpenBLT(reader) {
 }
 
 /**
+ * Gets the device signature by sending a command and reading a length-prefixed string.
+ * This is based on the rusefi binary protocol.
+ * @param {WritableStreamDefaultWriter} writer The writer to send the command.
+ * @param {ReadableStreamDefaultReader} reader The reader to read the response.
+ * @returns {Promise<string|null>} The signature string, or null if an error occurs.
+ */
+async function getSignature(writer, reader) {
+    output.textContent += 'Requesting device signature...\n';
+    try {
+        // Send the 'A' command (0x41)
+        await writer.write(new Uint8Array([0x41]));
+        output.textContent += 'Sent signature request (command \'A\').\n';
+
+        // Read the 16-bit length of the signature string (little-endian)
+        const readLengthPromise = reader.read();
+        const timeoutPromise = new Promise((resolve, reject) => {
+            setTimeout(() => {
+                reject(new Error("Timeout: Did not receive length within 500ms."));
+            }, 500);
+        });
+
+        const lengthResult = await Promise.race([readLengthPromise, timeoutPromise]);
+        const { value: lengthBytes, done: lengthDone } = lengthResult;
+
+        if (lengthDone || !lengthBytes || lengthBytes.length < 2) {
+            output.textContent += 'Failed to read signature length.\n';
+            return null;
+        }
+
+        // Decode the 16-bit little-endian integer
+        const length = new DataView(lengthBytes.buffer).getUint16(0, true);
+
+        // Read the signature string itself
+        const signatureBytes = new Uint8Array(length);
+        let bytesRead = 0;
+        while (bytesRead < length) {
+            const { value, done } = await reader.read();
+            if (done || !value) {
+                output.textContent += 'Failed to read full signature string.\n';
+                return null;
+            }
+            signatureBytes.set(value.slice(0, length - bytesRead), bytesRead);
+            bytesRead += value.length;
+        }
+
+        const signature = new TextDecoder().decode(signatureBytes);
+        output.textContent += `Received signature: "${signature}"\n`;
+        return signature;
+
+    } catch (error) {
+        console.error("Error getting signature:", error);
+        output.textContent += `Error getting signature: ${error.message}\n`;
+        return null;
+    }
+}
+
+/**
  * Main function to handle the serial connection process.
  */
 async function connectAndSendMessage() {
@@ -98,29 +155,59 @@ async function connectAndSendMessage() {
         await port.open({ baudRate: 9600 });
         output.textContent += 'Connection successful! Port opened at 9600 baud.\n';
 
-        // Setup the text encoder and decoder streams
-        const textEncoder = new TextEncoderStream();
-        const textDecoder = new TextDecoderStream();
-
-        const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
-        writer = textEncoder.writable.getWriter();
-        reader = textDecoder.readable.getReader();
+        // Get a reader and writer for binary data
+        writer = port.writable.getWriter();
+        reader = port.readable.getReader();
 
         // Check if the port is an OpenBLT device
         const isOpenBLT = await checkOpenBLT(reader);
 
+        // Since we are reading raw bytes for OpenBLT check, we need to release the lock
+        // and re-get the reader/writer to switch to a TextDecoder.
+        reader.releaseLock();
+        writer.releaseLock();
+
+        // The user's request is to check for openblt, if not found, get signature.
         if (!isOpenBLT) {
-            // If it's not OpenBLT, proceed with sending the "Hello, World!" message.
-            output.textContent += 'Proceeding with standard communication.\n';
-            const messageToSend = "Hello, World!\n";
-            await writer.write(messageToSend);
-            output.textContent += `Sent message: "${messageToSend.trim()}"\n`;
-            showMessage('Message sent successfully!');
+            // Re-get reader/writer for raw bytes for signature
+            writer = port.writable.getWriter();
+            reader = port.readable.getReader();
+
+            const signature = await getSignature(writer, reader);
+
+            // Re-release and re-get with text decoder for subsequent communication
+            reader.releaseLock();
+            writer.releaseLock();
+
+            // Set up the text decoder and encoder streams for further communication.
+            const textEncoder = new TextEncoderStream();
+            const textDecoder = new TextDecoderStream();
+
+            port.readable.pipeTo(textDecoder.writable);
+            port.writable.pipeTo(textEncoder.writable);
+            writer = textEncoder.writable.getWriter();
+            reader = textDecoder.readable.getReader();
+
+            if (signature) {
+                 output.textContent += 'Proceeding with standard communication.\n';
+                 const messageToSend = "Hello, World!\n";
+                 await writer.write(messageToSend);
+                 output.textContent += `Sent message: "${messageToSend.trim()}"\n`;
+                 showMessage('Message sent successfully!');
+            }
         } else {
-            // If it is an OpenBLT device, you would implement the specific communication
+            // If it is an OpenBLT device, we would implement the specific communication
             // protocol here. For this example, we'll just acknowledge the detection.
             output.textContent += 'OpenBLT device detected. No "Hello, World!" message sent automatically.\n';
             showMessage('OpenBLT device detected. Ready for specific commands.');
+
+            // Re-release and re-get with text decoder for subsequent communication
+            const textEncoder = new TextEncoderStream();
+            const textDecoder = new TextDecoderStream();
+            port.readable.pipeTo(textDecoder.writable);
+            port.writable.pipeTo(textEncoder.writable);
+            writer = textEncoder.writable.getWriter();
+            reader = textDecoder.readable.getReader();
         }
 
         // Keep listening for incoming data, regardless of the protocol check outcome
