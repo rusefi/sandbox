@@ -1,3 +1,4 @@
+import { bytesToHex } from "./utils.js";
 // Get references to the HTML elements
 const connectButton = document.getElementById('connectButton');
 const output = document.getElementById('output');
@@ -80,18 +81,6 @@ function showMessage(text) {
     setTimeout(() => {
         messageBox.classList.remove('show');
     }, 3000);
-}
-
-/**
- * Helper function to convert a Uint8Array to a hex string for logging.
- * @param {Uint8Array} bytes The array of bytes to convert.
- * @returns {string} The hexadecimal representation of the bytes.
- */
-function bytesToHex(bytes) {
-    if (!bytes) {
-        return "";
-    }
-    return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(' ');
 }
 
 /**
