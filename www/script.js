@@ -1,4 +1,14 @@
+// global state: is dangerous!! use redux or something in that style!
+// as a side note, this all window.etc are for reference, we don't need to actually initialize them
+window.pendingWebSerialBytes = []; // bytes pending to be readed
+window.webSerialWriteBytes = () => {}; // sends raw bytes to the serial device
+window.webSerialWriteString = () => {}; // encode the input string and send to the serial device
+window.webSerialConnected = false;
+
+// deps:
+import { connectAndSendMessage } from "./webserial/index.js";
 import { bytesToHex } from "./utils.js";
+
 // Get references to the HTML elements
 const connectButton = document.getElementById('connectButton');
 const output = document.getElementById('output');
@@ -213,124 +223,6 @@ async function getSignature(writer, reader) {
     }
 }
 
-/**
- * Main function to handle the serial connection process.
- */
-async function connectAndSendMessage() {
-    // Check if the Web Serial API is supported by the browser
-    if (!('serial' in navigator)) {
-        showMessage('Web Serial API not supported in this browser. Please use Chrome, Edge, or a Chromium-based browser.');
-        return;
-    }
-
-    output.textContent = 'Web Serial API is supported. Attempting to connect...';
-
-    // Request a serial port from the user
-    let port;
-    let reader;
-    let writer;
-
-    try {
-        port = await navigator.serial.requestPort();
-
-        await port.open({ baudRate: 9600 });
-        output.textContent += 'Connection successful! Port opened at 9600 baud.\n';
-
-        // Get a reader and writer for binary data
-        writer = port.writable.getWriter();
-        reader = port.readable.getReader();
-
-        // Check if the port is an OpenBLT device
-        const isOpenBLT = await checkOpenBLT(reader);
-
-        // Since we are reading raw bytes for OpenBLT check, we need to release the lock
-        // and re-get the reader/writer to switch to a TextDecoder.
-        reader.releaseLock();
-        writer.releaseLock();
-
-        // The user's request is to check for openblt, if not found, get signature.
-        if (!isOpenBLT) {
-            // Re-get reader/writer for raw bytes for signature
-            writer = port.writable.getWriter();
-            reader = port.readable.getReader();
-
-            const signature = await getSignature(writer, reader);
-
-            // Re-release and re-get with text decoder for subsequent communication
-            reader.releaseLock();
-            writer.releaseLock();
-
-            // Set up the text decoder and encoder streams for further communication.
-            const textEncoder = new TextEncoderStream();
-            const textDecoder = new TextDecoderStream();
-
-            port.readable.pipeTo(textDecoder.writable);
-            textEncoder.readable.pipeTo(port.writable);
-            writer = textEncoder.writable.getWriter();
-            reader = textDecoder.readable.getReader();
-
-            if (signature) {
-                 output.textContent += 'Proceeding with standard communication.\n';
-                 const messageToSend = "Hello, World!\n";
-
-                 // Log the message before sending
-                 console.log("Sending text message:", messageToSend);
-
-                 await writer.write(messageToSend);
-                 output.textContent += `Sent message: "${messageToSend.trim()}"\n`;
-                 showMessage('Message sent successfully!');
-            }
-        } else {
-            // If it is an OpenBLT device, we would implement the specific communication
-            // protocol here. For this example, we'll just acknowledge the detection.
-            output.textContent += 'OpenBLT device detected. No "Hello, World!" message sent automatically.\n';
-            showMessage('OpenBLT device detected. Ready for specific commands.');
-
-            // Re-release and re-get with text decoder for subsequent communication
-            const textEncoder = new TextEncoderStream();
-            const textDecoder = new TextDecoderStream();
-            port.readable.pipeTo(textDecoder.writable);
-            textEncoder.readable.pipeTo(port.writable);
-            writer = textEncoder.writable.getWriter();
-            reader = textDecoder.readable.getReader();
-        }
-
-        // Keep listening for incoming data, regardless of the protocol check outcome
-        output.textContent += 'Listening for incoming data...\n';
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) {
-                // Reader has been closed
-                output.textContent += 'Reader closed.\n';
-                break;
-            }
-            // Log the received text message
-            console.log("Received text:", value);
-            output.textContent += `Received: ${value}`;
-        }
-    } catch (error) {
-        console.error("Serial connection error:", error);
-        if (error.name === 'NotFoundError') {
-            showMessage('No serial port selected.');
-        } else if (error.name === 'NetworkError' && error.message.includes('permission denied')) {
-            showMessage('Connection failed: Permission denied by user or system.');
-        } else {
-            showMessage(`An error occurred: ${error.message}`);
-        }
-        output.textContent += `\nError: ${error.message}`;
-    } finally {
-        // Ensure streams are released if an error occurs
-        if (writer) {
-            writer.releaseLock();
-        }
-        if (reader) {
-            reader.releaseLock();
-        }
-        if (port && port.opened) {
-            await port.close();
-        }
-    }
-}
 
 // Add a click event listener to the button
 connectButton.addEventListener('click', connectAndSendMessage);
